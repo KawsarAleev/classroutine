@@ -299,6 +299,12 @@
       color:#6b7280; font-style:italic;
     }
 
+    /* PDF-friendly adjustments (applied temporarily during export) */
+    .for-pdf{ background:#fff !important; border:0 !important; }
+    .for-pdf .head{ border:0 !important; }
+    .for-pdf thead th{ position:static !important; background:#fff !important; box-shadow:none !important; }
+    .for-pdf, .for-pdf *{ box-shadow:none !important; }
+
     /* Helper small text */
     .muted{
       color:#64748b; font-size:12px;
@@ -316,7 +322,7 @@
       <h1>Class Routine Generator</h1>
       <p class="subtitle">Create your routine for Saturday–Thursday. Add courses per day, mark Off Days, then generate and download your routine as a PDF.</p>
     </header>
-
+v2-----
     <section class="card" id="builderCard">
       <div id="daysContainer"></div>
 
@@ -439,7 +445,6 @@
           courses.style.display = 'grid';
           offNote.hidden = true;
         }
-        // re-measure panel height to keep animation smooth
         autoSizePanel(panel);
       });
 
@@ -471,7 +476,6 @@
       }
     }
     function autoSizePanel(panel){
-      // Temporarily set to 'auto' height by measuring scrollHeight
       requestAnimationFrame(()=> {
         panel.style.maxHeight = panel.scrollHeight + 'px';
       });
@@ -629,13 +633,12 @@
       });
     }
 
-    // Handlers
+    // Make routine handler
     async function handleMake(){
       pdfBtn.disabled = true;
       statusMsg.hidden = true;
 
       const data = collectRoutineData();
-      // Build table (hidden for now)
       routineTableWrap.innerHTML = '';
       const table = buildRoutineTable(data);
       routineTableWrap.appendChild(table);
@@ -653,12 +656,10 @@
       routineOutput.hidden = false;
       pdfBtn.disabled = false;
 
-      // Scroll to output
       routineOutput.scrollIntoView({behavior:'smooth', block:'start'});
     }
 
     function handleReset(){
-      // Clear off days, remove all courses
       document.querySelectorAll('.day-section').forEach(sec => {
         const off = sec.querySelector('.offday-input');
         off.checked = false;
@@ -683,28 +684,74 @@
       progressBar.style.width = '0%';
       pdfBtn.disabled = true;
       generatedInfo.textContent = '';
-      // scroll to top
       window.scrollTo({top:0, behavior:'smooth'});
     }
 
+    // Ensure html2pdf is loaded (with fallback if CDN blocked)
+    function ensureHtml2PdfLoaded(){
+      return new Promise((resolve, reject) => {
+        if (window.html2pdf) return resolve();
+        const s = document.createElement('script');
+        s.src = 'https://unpkg.com/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js';
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error('Failed to load html2pdf.js'));
+        document.head.appendChild(s);
+      });
+    }
+
+    // Download PDF (uses on-page element + temporary PDF-friendly CSS)
     async function handlePdf(){
-      if(routineOutput.hidden) return;
-      const opt = {
-        margin: 10,
-        filename: 'class-routine.pdf',
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      };
-      // Clone a clean printable area to avoid cutting shadows
-      const printable = routineOutput.cloneNode(true);
-      // Ensure table header visible for PDF
-      printable.style.boxShadow = 'none';
-      printable.style.border = '0';
-      await html2pdf().set(opt).from(printable).save();
+      if (routineOutput.hidden) {
+        alert('Please click "Make Routine" first.');
+        return;
+      }
+      try{
+        pdfBtn.disabled = true;
+        const originalText = pdfBtn.textContent;
+        pdfBtn.textContent = '⏳ Generating...';
+
+        await ensureHtml2PdfLoaded();
+
+        // Make table export-friendly
+        routineOutput.classList.add('for-pdf');
+
+        // Give the browser a tick to apply CSS changes (helps Safari)
+        await new Promise(r => setTimeout(r, 50));
+
+        const ts = new Date();
+        const filename = `class-routine_${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}-${String(ts.getDate()).padStart(2,'0')}_${String(ts.getHours()).padStart(2,'0')}${String(ts.getMinutes()).padStart(2,'0')}.pdf`;
+
+        const opt = {
+          margin: 10,
+          filename,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: {
+            scale: 2,
+            useCORS: true,
+            windowWidth: routineOutput.scrollWidth
+          },
+          pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+
+        await html2pdf().set(opt).from(routineOutput).save();
+        pdfBtn.textContent = originalText;
+      }catch(err){
+        console.error(err);
+        alert('PDF generation failed. Please check your internet (for the PDF library) or try again.\n\nDetails: ' + (err?.message || err));
+      }finally{
+        routineOutput.classList.remove('for-pdf');
+        pdfBtn.disabled = false;
+      }
     }
 
     // Init
+    function initDays(){
+      const frag = document.createDocumentFragment();
+      DAYS.forEach(day => frag.appendChild(buildDaySection(day)));
+      daysContainer.appendChild(frag);
+    }
+
     initDays();
     makeBtn.addEventListener('click', handleMake);
     resetBtn.addEventListener('click', handleReset);
